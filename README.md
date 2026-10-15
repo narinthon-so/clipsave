@@ -81,11 +81,11 @@ clipsave install                  Add "Paste image here" to the file manager's r
 clipsave uninstall                Remove it again
 
 -n, --name <NAME>   File name (".png" is added if missing). Default: image-YYYYMMDD-HHMMSS.png
-    --reveal        Select the new file in Explorer and start renaming it (Windows)
+    --reveal        Select the new file in the open Explorer window and start renaming it (Windows)
     --gui           Report errors in a dialog/notification instead of only on stderr
 ```
 
-It prints the saved path on success. Exit codes are `0` for saved, `1` if there's no image on the clipboard, and `2` for any other error. That makes it easy to script, for example from WSL: `clipsave.exe "$(wslpath -w .)"`.
+It prints the saved path on success. Exit codes are `0` for saved, `1` if there's no readable image on the clipboard, and `2` for any other error. That makes it easy to script, for example from WSL: `clipsave.exe "$(wslpath -w .)"`.
 
 ## How it works
 
@@ -95,7 +95,7 @@ right-click ─▶ clipsavew.exe save --gui --reveal "%V"
                  ├─ resolve_dir   "%V" on a drive root arrives as  D:"  (argv quirk) → D:\
                  ├─ clip          arboard: PNG format ▸ CF_DIBV5   (retries if another app holds the clipboard)
                  ├─ output        RGBA → PNG, create_new image-…png / -1 / -2 …
-                 └─ notify        SHOpenFolderAndSelectItems(OFASI_EDIT) → file selected, rename box open
+                 └─ notify        IShellWindows → the open view of that folder → SelectItem(SVSI_EDIT)
 ```
 
 | Module | Responsibility |
@@ -109,6 +109,7 @@ right-click ─▶ clipsavew.exe save --gui --reveal "%V"
 Some details that only showed up in testing:
 
 - When you right-click empty space at a drive root, Explorer expands `"%V"` to `"D:\"`. Windows argument parsing reads `\"` as an escaped quote, so the program receives `D:"`. `resolve_dir` repairs this, and a test on a `subst` drive covers it.
+- `SHOpenFolderAndSelectItems`, the usual "select this file" call, opens a *second* Explorer window on Windows 11 instead of reusing the one you right-clicked in. clipsave goes through `IShellWindows` instead, finds the view already showing the folder, and selects the file there. Explorer's PIDL for the folder doesn't compare equal to one built from the path, so windows are matched by filesystem path, and the file's item ID is parsed through the view's own `IShellFolder`.
 - Stripping `.png` from a Thai file name by byte index panics, because the cut lands in the middle of a 3-byte character. The unit tests caught it.
 
 ## Tests

@@ -38,6 +38,10 @@ pub fn read_image() -> Result<Image, ReadError> {
                 })
             }
             Err(arboard::Error::ContentNotAvailable) => return Err(ReadError::NoImage),
+            // Some X11 owners (xclip, older toolkits) answer an `image/png`
+            // request with whatever they hold, e.g. text, so the decode fails.
+            // To the user that is still "no usable image".
+            Err(arboard::Error::ConversionFailure) => return Err(ReadError::NoImage),
             Err(arboard::Error::ClipboardOccupied) => last = "the clipboard is busy".into(),
             Err(e) => return Err(ReadError::Other(e.to_string())),
         }

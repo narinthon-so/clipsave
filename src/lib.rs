@@ -68,7 +68,7 @@ fn save(opts: cli::SaveOpts, windowless: bool) -> i32 {
         Ok(image) => image,
         Err(clip::ReadError::NoImage) => {
             report_error(
-                "There is no image on the clipboard.\n\n\
+                "There is no image on the clipboard (or not in a format clipsave can read).\n\n\
                  Copy an image first (in Figma: Copy as PNG, Ctrl+Shift+C).",
                 gui,
             );

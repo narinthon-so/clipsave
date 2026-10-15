@@ -10,13 +10,13 @@ USAGE:
 
 OPTIONS:
     -n, --name <NAME>   File name (\".png\" is added if missing). Default: image-YYYYMMDD-HHMMSS.png
-        --reveal        Select the new file in Explorer and start renaming it (Windows)
+        --reveal        Select the new file in the open Explorer window and start renaming it (Windows)
         --gui           Report errors in a dialog/notification instead of only on stderr
     -h, --help          Show this help
     -V, --version       Show the version
 
 Existing files are never overwritten: a -1, -2, ... suffix is added instead.
-Prints the saved path on success. Exit code 1 = no image on the clipboard, 2 = other error.";
+Prints the saved path on success. Exit code 1 = no (readable) image on the clipboard, 2 = other error.";
 
 #[derive(Debug, PartialEq)]
 pub enum Command {

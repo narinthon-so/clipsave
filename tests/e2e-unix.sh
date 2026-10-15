@@ -45,8 +45,8 @@ pass "collision gets -1 suffix"
 # 3. text on the clipboard -> exit 1, nothing written
 copy_text
 before=$(ls "$dir" | wc -l)
-set +e; "$bin" "$dir" 2>/dev/null; code=$?; set -e
-[ "$code" -eq 1 ] || { echo "FAIL  text clipboard exit $code"; exit 1; }
+set +e; err=$("$bin" "$dir" 2>&1 >/dev/null); code=$?; set -e
+[ "$code" -eq 1 ] || { echo "FAIL  text clipboard exit $code: $err"; exit 1; }
 [ "$(ls "$dir" | wc -l)" -eq "$before" ] || { echo "FAIL  text clipboard wrote a file"; exit 1; }
 pass "text clipboard: exit 1, nothing written"
 

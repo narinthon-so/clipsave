@@ -76,17 +76,26 @@ Check ((Get-ChildItem $dir).Count -eq $before + 1) "folder verb wrote a file"
 # 5b. Background verb ("Paste image here") with --reveal: the new file must end
 #     up selected in the open Explorer window.
 $sh = New-Object -ComObject Shell.Application
+function DirWindows { @($sh.Windows() | Where-Object { try { $_.Document.Folder.Self.Path -eq $dir } catch { $false } }) }
+DirWindows | ForEach-Object { $_.Quit() }   # leftovers from earlier runs
 $sh.Open($dir); Start-Sleep -Milliseconds 1500
 $before = @(Get-ChildItem $dir | ForEach-Object Name)
 Check ((RunVerb $bgcmd $dir) -eq 0) "background verb (--reveal): exit 0"
 $new = @(Get-ChildItem $dir | Where-Object { $before -notcontains $_.Name })
 Check ($new.Count -eq 1) "background verb wrote a file"
-Start-Sleep -Milliseconds 1500
-$win = $sh.Windows() | Where-Object { try { $_.Document.Folder.Self.Path -eq $dir } catch { $false } } | Select-Object -First 1
-$selected = if ($win) { @($win.Document.SelectedItems() | ForEach-Object Name) } else { @() }
-Check ($win -and ($selected -contains $new[0].Name -or $selected -contains $new[0].BaseName)) "reveal selected $($new[0].Name) (selected: $($selected -join ', '))"
-[System.Windows.Forms.SendKeys]::SendWait('{ESC}')
-if ($win) { $win.Quit() }
+if ($env:GITHUB_ACTIONS) {
+    "SKIP  reveal selection (CI runners have no interactive Explorer shell)"
+} else {
+    # Explorer applies the selection asynchronously: poll for up to 6 s.
+    $selected = @()
+    for ($i = 0; $i -lt 20 -and -not ($selected -contains $new[0].Name -or $selected -contains $new[0].BaseName); $i++) {
+        Start-Sleep -Milliseconds 300
+        $selected = @(DirWindows | ForEach-Object { $_.Document.SelectedItems() } | ForEach-Object Name)
+    }
+    Check ($selected -contains $new[0].Name -or $selected -contains $new[0].BaseName) "reveal selected $($new[0].Name) (selected: $($selected -join ', '))"
+    Check ((DirWindows | Measure-Object).Count -eq 1) "reveal reused the open window (no second window)"
+}
+DirWindows | ForEach-Object { $_.Quit() }
 
 # 6. Drive root: "%V" -> "X:\" arrives as X:"
 $drive = (69..90 | ForEach-Object { [char]$_ + ':' } | Where-Object { -not (Test-Path "$_\") } | Select-Object -Last 1)
