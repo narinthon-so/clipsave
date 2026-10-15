@@ -20,7 +20,7 @@ $ clipsave ~/Desktop --name hero
 - **No admin rights.** Installs per user: `HKCU` registry on Windows, `~/.local` on Linux and macOS.
 - **No console flash.** On Windows the menu runs `clipsavew.exe`, a windowless twin of the CLI (like `python`/`pythonw`). Errors appear as a dialog, not a console window that disappears too fast to read.
 - **Small and self-contained.** One small binary per OS, no runtime. The Windows exe is about 380 KB.
-- **Unicode paths work.** Thai, emoji and spaces in folder and file names are covered by tests.
+- **Unicode paths work.** Thai characters and spaces in folder and file names are covered by tests.
 
 ## Install
 
@@ -36,7 +36,7 @@ This copies both exes to `%LOCALAPPDATA%\Programs\clipsave` and adds two menu en
 
 | Right-click on…          | Entry                      | Result                                               |
 |--------------------------|----------------------------|------------------------------------------------------|
-| empty space in a folder or on the desktop | **Paste image here**       | saves, selects the file and starts renaming it |
+| empty space in a folder  | **Paste image here**       | saves, selects the file and starts renaming it |
 | a folder icon            | **Paste image into folder** | saves into that folder without opening it            |
 
 On Windows 11 these entries are under **Show more options**. **Shift+right-click** opens that menu directly. Windows only lets packaged, signed apps add to the new compact menu.
@@ -58,6 +58,8 @@ This copies the binary to `~/.local/bin/clipsave` and adds a menu entry for each
 | Dolphin (KDE) | right-click → **Paste image here** |
 
 Notifications go through `notify-send` when it's available.
+
+> The entry files are checked in CI, but where they show up in each file manager hasn't been tried on a real desktop yet. Bug reports are welcome.
 
 ### macOS
 
@@ -118,7 +120,7 @@ xvfb-run -a bash tests/e2e-unix.sh target/release/clipsave       # Linux end-to-
 bash tests/e2e-unix.sh target/release/clipsave                   # macOS end-to-end
 ```
 
-The end-to-end scripts put a real image on the system clipboard, run the binary and check the PNG pixel by pixel, including alpha. On Windows the script also installs clipsave and runs the registry command lines exactly as Explorer would, against a Thai-named folder and a drive root. CI runs all of this on Windows, Ubuntu and macOS for every push.
+The end-to-end scripts put a real image on the system clipboard, run the binary and check the PNG pixel by pixel, including alpha. On Windows the script also installs clipsave and runs the registry command lines exactly as Explorer would, against a Thai-named folder and a drive root. CI runs the same checks on Windows, Ubuntu (X11 under xvfb) and macOS.
 
 ## Build
 
