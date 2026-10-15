@@ -8,7 +8,7 @@
 //! ignores every key except V.
 
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU32, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::OnceLock;
 
@@ -19,7 +19,6 @@ use windows::Win32::Foundation::{
 };
 use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
 use windows::Win32::System::DataExchange::{IsClipboardFormatAvailable, RegisterClipboardFormatW};
-use windows::Win32::System::Diagnostics::Debug::MessageBeep;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Ole::{CF_BITMAP, CF_DIB, CF_DIBV5, CF_HDROP};
 use windows::Win32::System::Threading::{
@@ -30,7 +29,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
 };
 use windows::Win32::UI::Shell::{
-    Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
+    Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_TIP, NIIF_WARNING, NIM_ADD, NIM_DELETE,
+    NIM_MODIFY, NOTIFYICONDATAW, NOTIFY_ICON_MESSAGE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CallNextHookEx, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
@@ -38,10 +38,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetGUIThreadInfo, GetMessageW, GetWindowThreadProcessId, LoadIconW, PostMessageW,
     PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SetForegroundWindow,
     SetWindowsHookExW, TrackPopupMenu, TranslateMessage, UnhookWindowsHookEx, GA_PARENT,
-    GUITHREADINFO, HC_ACTION, IDI_APPLICATION, KBDLLHOOKSTRUCT, MB_ICONWARNING, MF_GRAYED,
-    MF_SEPARATOR, MF_STRING, MSG, TPM_RIGHTBUTTON, WH_KEYBOARD_LL, WINDOW_EX_STYLE, WM_APP,
-    WM_CLOSE, WM_COMMAND, WM_CONTEXTMENU, WM_DESTROY, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONUP, WM_NULL,
-    WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WNDCLASSW, WS_OVERLAPPED,
+    GUITHREADINFO, HC_ACTION, IDI_APPLICATION, KBDLLHOOKSTRUCT, MF_GRAYED, MF_SEPARATOR, MF_STRING,
+    MSG, TPM_RIGHTBUTTON, WH_KEYBOARD_LL, WINDOW_EX_STYLE, WM_APP, WM_CLOSE, WM_COMMAND,
+    WM_CONTEXTMENU, WM_DESTROY, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP,
+    WM_SYSKEYDOWN, WM_SYSKEYUP, WNDCLASSW, WS_OVERLAPPED,
 };
 
 use super::rules::{takes_over, Focus, Modifiers, Offer};
@@ -60,6 +60,8 @@ static FORMATS: OnceLock<Formats> = OnceLock::new();
 /// a burst of files and the matching key-up is swallowed too.
 static V_TAKEN: AtomicBool = AtomicBool::new(false);
 static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
+/// The agent's hidden window, owner of the tray icon (for notifications).
+static AGENT_WINDOW: AtomicIsize = AtomicIsize::new(0);
 
 struct Formats {
     png: u32,
@@ -125,6 +127,7 @@ pub fn run() -> Result<String, String> {
             RegisterWindowMessageW(w!("TaskbarCreated")),
             Ordering::Relaxed,
         );
+        AGENT_WINDOW.store(hwnd.0 as isize, Ordering::Relaxed);
         tray(hwnd, NIM_ADD);
 
         let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook), Some(instance), 0)
@@ -282,15 +285,17 @@ unsafe fn should_take_over(fg: HWND) -> bool {
 /// Worker thread: save into the folder the window shows, then select the file.
 fn paste_into(window: HWND) {
     let Some(dir) = explorer::folder_of_window(window) else {
-        // Home, This PC, Gallery...: no folder on disk to save into.
-        unsafe {
-            let _ = MessageBeep(MB_ICONWARNING);
-        }
+        // This PC, Gallery, libraries...: no folder on disk to save into.
+        // A toast, not a dialog: Explorer itself would do nothing here.
+        toast(
+            "Can't paste the image here",
+            "This view isn't a folder on disk. Open a folder (or the desktop) and press Ctrl+V again.",
+        );
         return;
     };
     match crate::save_clipboard(&dir, None) {
         Ok(path) => explorer::reveal(&path),
-        Err(e) => crate::notify::error(&e.message),
+        Err(e) => toast("Can't paste the image", &e.message),
     }
 }
 
@@ -329,7 +334,32 @@ unsafe extern "system" fn window_proc(
     }
 }
 
-unsafe fn tray(hwnd: HWND, action: windows::Win32::UI::Shell::NOTIFY_ICON_MESSAGE) {
+/// A Windows notification from the tray icon (non-blocking).
+fn toast(title: &str, text: &str) {
+    let hwnd = HWND(AGENT_WINDOW.load(Ordering::Relaxed) as *mut _);
+    let mut data = NOTIFYICONDATAW {
+        cbSize: size_of::<NOTIFYICONDATAW>() as u32,
+        hWnd: hwnd,
+        uID: 1,
+        uFlags: NIF_INFO,
+        dwInfoFlags: NIIF_WARNING,
+        ..Default::default()
+    };
+    copy_truncated(&mut data.szInfoTitle, title);
+    copy_truncated(&mut data.szInfo, text);
+    unsafe {
+        let _ = Shell_NotifyIconW(NIM_MODIFY, &data);
+    }
+}
+
+/// Copies `s` into a fixed UTF-16 buffer, always leaving a terminating 0.
+fn copy_truncated(buf: &mut [u16], s: &str) {
+    let wide: Vec<u16> = s.encode_utf16().take(buf.len() - 1).collect();
+    buf[..wide.len()].copy_from_slice(&wide);
+    buf[wide.len()] = 0;
+}
+
+unsafe fn tray(hwnd: HWND, action: NOTIFY_ICON_MESSAGE) {
     let mut data = NOTIFYICONDATAW {
         cbSize: size_of::<NOTIFYICONDATAW>() as u32,
         hWnd: hwnd,
@@ -339,10 +369,10 @@ unsafe fn tray(hwnd: HWND, action: windows::Win32::UI::Shell::NOTIFY_ICON_MESSAG
         hIcon: LoadIconW(None, IDI_APPLICATION).unwrap_or_default(),
         ..Default::default()
     };
-    let tip: Vec<u16> = "clipsave: Ctrl+V in Explorer saves clipboard images"
-        .encode_utf16()
-        .collect();
-    data.szTip[..tip.len()].copy_from_slice(&tip);
+    copy_truncated(
+        &mut data.szTip,
+        "clipsave: Ctrl+V in Explorer saves clipboard images",
+    );
     let _ = Shell_NotifyIconW(action, &data);
 }
 
