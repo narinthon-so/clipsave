@@ -245,8 +245,13 @@ mod tests {
     fn unix_paths_are_used_verbatim() {
         use std::os::unix::ffi::OsStrExt;
         let base = tempdir("verbatim");
-        // trailing space, a literal quote and non-UTF-8 bytes are all valid names
-        for name in [&b"trailing space "[..], b"quote\"", b"latin1-\xe9"] {
+        // trailing space, a literal quote and (on Linux; APFS rejects them)
+        // non-UTF-8 bytes are all valid names
+        let mut names = vec![&b"trailing space "[..], b"quote\""];
+        if cfg!(target_os = "linux") {
+            names.push(b"latin1-\xe9");
+        }
+        for name in names {
             let dir = base.join(OsStr::from_bytes(name));
             fs::create_dir(&dir).unwrap();
             assert_eq!(resolve_dir(Some(dir.as_os_str())).unwrap(), dir);
