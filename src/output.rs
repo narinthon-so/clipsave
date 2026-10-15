@@ -10,38 +10,51 @@ use crate::clip::Image;
 /// Turns the DIR argument into an existing folder.
 ///
 /// * none → current directory
-/// * a file → its parent folder
-/// * `D:"` → `D:\` — Explorer expands `"%V"` on a drive root to `"D:\"`, and
-///   Windows argv rules read the `\"` as an escaped quote.
+/// * a file → its parent folder (a bare `foo.txt` → current directory)
+/// * Windows: `D:"` → `D:\` — Explorer expands `"%V"` on a drive root to
+///   `"D:\"`, and Windows argv rules read the `\"` as an escaped quote.
+///
+/// Any other path is used exactly as given: no trimming, no lossy UTF-8.
 pub fn resolve_dir(arg: Option<&OsStr>) -> Result<PathBuf, String> {
     let dir = match arg {
-        None => {
-            std::env::current_dir().map_err(|e| format!("Cannot read the current folder: {e}"))?
-        }
-        Some(raw) => {
-            let raw = raw.to_string_lossy();
-            let trimmed = raw.trim().trim_end_matches('"');
-            if trimmed.is_empty() {
-                return Err("The folder path is empty.".into());
-            }
-            let mut s = trimmed.to_owned();
-            if s.len() == 2 && s.ends_with(':') {
-                s.push(std::path::MAIN_SEPARATOR);
-            }
-            PathBuf::from(s)
-        }
+        None => current_dir()?,
+        Some(raw) if raw.is_empty() => return Err("The folder path is empty.".into()),
+        Some(raw) => repair_explorer_arg(raw),
     };
 
     if dir.is_dir() {
         Ok(dir)
     } else if dir.is_file() {
-        dir.parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .map(Path::to_path_buf)
-            .ok_or_else(|| format!("Cannot find the folder of {}", dir.display()))
+        match dir.parent() {
+            Some(p) if !p.as_os_str().is_empty() => Ok(p.to_path_buf()),
+            _ => current_dir(),
+        }
     } else {
         Err(format!("Folder not found: {}", dir.display()))
     }
+}
+
+fn current_dir() -> Result<PathBuf, String> {
+    std::env::current_dir().map_err(|e| format!("Cannot read the current folder: {e}"))
+}
+
+#[cfg(windows)]
+fn repair_explorer_arg(raw: &OsStr) -> PathBuf {
+    match raw.to_str() {
+        Some(s) if s.ends_with('"') => {
+            let mut s = s.trim_end_matches('"').to_owned();
+            if s.len() == 2 && s.ends_with(':') {
+                s.push('\\');
+            }
+            PathBuf::from(s)
+        }
+        _ => PathBuf::from(raw),
+    }
+}
+
+#[cfg(not(windows))]
+fn repair_explorer_arg(raw: &OsStr) -> PathBuf {
+    PathBuf::from(raw)
 }
 
 /// `image-20261015-143000`, local time.
@@ -199,12 +212,14 @@ mod tests {
 
         // a file resolves to its folder
         assert_eq!(resolve_dir(Some(file.as_os_str())).unwrap(), dir);
-        // stray trailing quote from "%V" on a drive root
-        let quoted = format!("{}\"", dir.display());
-        assert_eq!(resolve_dir(Some(OsStr::new(&quoted))).unwrap(), dir);
+        // a bare file name resolves to the current folder (tests run in the crate root)
+        assert_eq!(
+            resolve_dir(Some(OsStr::new("Cargo.toml"))).unwrap(),
+            std::env::current_dir().unwrap()
+        );
         // missing folder
         assert!(resolve_dir(Some(dir.join("nope").as_os_str())).is_err());
-        assert!(resolve_dir(Some(OsStr::new("\""))).is_err());
+        assert!(resolve_dir(Some(OsStr::new(""))).is_err());
         // no arg = cwd
         assert_eq!(resolve_dir(None).unwrap(), std::env::current_dir().unwrap());
         fs::remove_dir_all(&dir).unwrap();
@@ -212,12 +227,36 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn drive_root_quirk() {
+    fn explorer_quote_quirks() {
+        let dir = tempdir("quote");
+        // stray trailing quote from "%V"
+        let quoted = format!("{}\"", dir.display());
+        assert_eq!(resolve_dir(Some(OsStr::new(&quoted))).unwrap(), dir);
         // Explorer passes `C:"` for "%V" on C:\ — must become C:\
         assert_eq!(
             resolve_dir(Some(OsStr::new("C:\""))).unwrap(),
             PathBuf::from("C:\\")
         );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_paths_are_used_verbatim() {
+        use std::os::unix::ffi::OsStrExt;
+        let base = tempdir("verbatim");
+        // trailing space, a literal quote and (on Linux; APFS rejects them)
+        // non-UTF-8 bytes are all valid names
+        let mut names = vec![&b"trailing space "[..], b"quote\""];
+        if cfg!(target_os = "linux") {
+            names.push(b"latin1-\xe9");
+        }
+        for name in names {
+            let dir = base.join(OsStr::from_bytes(name));
+            fs::create_dir(&dir).unwrap();
+            assert_eq!(resolve_dir(Some(dir.as_os_str())).unwrap(), dir);
+        }
+        fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]
