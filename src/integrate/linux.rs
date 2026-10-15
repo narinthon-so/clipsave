@@ -63,6 +63,10 @@ fn data_home() -> Result<PathBuf, String> {
     }
 }
 
+/// The app icon, installed into the user's hicolor theme as `clipsave`.
+const ICON_PNG: &[u8] = include_bytes!("../../assets/clipsave.png");
+const ICON_REL: &str = "icons/hicolor/256x256/apps/clipsave.png";
+
 fn bin_path() -> Result<PathBuf, String> {
     Ok(home()?.join(".local/bin/clipsave"))
 }
@@ -117,7 +121,7 @@ fn nemo(bin: &Path) -> String {
          Name={LABEL}\n\
          Comment=Save the clipboard image as a PNG in this folder\n\
          Exec={} save --gui %P\n\
-         Icon-Name=image-x-generic\n\
+         Icon-Name=clipsave\n\
          Selection=None\n\
          Extensions=any;\n",
         exec_quote(&bin.to_string_lossy())
@@ -136,7 +140,7 @@ fn dolphin(bin: &Path) -> String {
          \n\
          [Desktop Action clipsavePaste]\n\
          Name={LABEL}\n\
-         Icon=image-x-generic\n\
+         Icon=clipsave\n\
          Exec={} save --gui %f\n",
         exec_quote(&bin.to_string_lossy())
     )
@@ -168,6 +172,13 @@ pub fn install(_agent: bool) -> Result<String, String> {
     }
 
     let data = data_home()?;
+    let icon = data.join(ICON_REL);
+    if let Some(parent) = icon.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Cannot create {}: {e}", parent.display()))?;
+    }
+    fs::write(&icon, ICON_PNG).map_err(|e| format!("Cannot write {}: {e}", icon.display()))?;
+
     let mut done = Vec::new();
     for entry in &ENTRIES {
         if entry.detect.iter().any(|d| on_path(d)) {
@@ -201,7 +212,7 @@ pub fn uninstall() -> Result<String, String> {
     let paths = ENTRIES
         .iter()
         .map(|e| data.join(e.rel_path))
-        .chain(Some(bin_path()?));
+        .chain([data.join(ICON_REL), bin_path()?]);
     for path in paths {
         if path.exists() {
             fs::remove_file(&path).map_err(|e| format!("Cannot remove {}: {e}", path.display()))?;
@@ -235,5 +246,7 @@ mod tests {
         assert!(nemo(bin).contains("Exec=\"/home/me/.local/bin/clipsave\" save --gui %P"));
         assert!(nemo(bin).contains("Selection=None"));
         assert!(dolphin(bin).contains("Exec=\"/home/me/.local/bin/clipsave\" save --gui %f"));
+        assert!(nemo(bin).contains("Icon-Name=clipsave"));
+        assert!(dolphin(bin).contains("Icon=clipsave"));
     }
 }

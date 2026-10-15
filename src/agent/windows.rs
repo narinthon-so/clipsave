@@ -35,13 +35,14 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CallNextHookEx, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu,
     DestroyWindow, DispatchMessageW, FindWindowW, GetAncestor, GetCursorPos, GetForegroundWindow,
-    GetGUIThreadInfo, GetMessageW, GetWindowThreadProcessId, LoadIconW, PostMessageW,
-    PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SetForegroundWindow,
-    SetWindowsHookExW, TrackPopupMenu, TranslateMessage, UnhookWindowsHookEx, GA_PARENT,
-    GUITHREADINFO, HC_ACTION, IDI_APPLICATION, KBDLLHOOKSTRUCT, MF_GRAYED, MF_SEPARATOR, MF_STRING,
-    MSG, TPM_RIGHTBUTTON, WH_KEYBOARD_LL, WINDOW_EX_STYLE, WM_APP, WM_CLOSE, WM_COMMAND,
-    WM_CONTEXTMENU, WM_DESTROY, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP,
-    WM_SYSKEYDOWN, WM_SYSKEYUP, WNDCLASSW, WS_OVERLAPPED,
+    GetGUIThreadInfo, GetMessageW, GetSystemMetrics, GetWindowThreadProcessId, LoadIconW,
+    LoadImageW, PostMessageW, PostQuitMessage, RegisterClassW, RegisterWindowMessageW,
+    SetForegroundWindow, SetWindowsHookExW, TrackPopupMenu, TranslateMessage, UnhookWindowsHookEx,
+    GA_PARENT, GUITHREADINFO, HC_ACTION, HICON, IDI_APPLICATION, IMAGE_ICON, KBDLLHOOKSTRUCT,
+    LR_DEFAULTCOLOR, MF_GRAYED, MF_SEPARATOR, MF_STRING, MSG, SM_CXSMICON, SM_CYSMICON,
+    TPM_RIGHTBUTTON, WH_KEYBOARD_LL, WINDOW_EX_STYLE, WM_APP, WM_CLOSE, WM_COMMAND, WM_CONTEXTMENU,
+    WM_DESTROY, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WM_SYSKEYDOWN,
+    WM_SYSKEYUP, WNDCLASSW, WS_OVERLAPPED,
 };
 
 use super::rules::{takes_over, Focus, Modifiers, Offer};
@@ -359,6 +360,26 @@ fn copy_truncated(buf: &mut [u16], s: &str) {
     buf[wide.len()] = 0;
 }
 
+/// The icon embedded by build.rs (resource id 1) at the tray's small-icon
+/// size for the current DPI, so Windows picks the matching frame instead of
+/// shrinking the 32 px one.
+unsafe fn app_icon() -> HICON {
+    let Ok(module) = GetModuleHandleW(None) else {
+        return LoadIconW(None, IDI_APPLICATION).unwrap_or_default();
+    };
+    LoadImageW(
+        Some(module.into()),
+        PCWSTR(1 as _),
+        IMAGE_ICON,
+        GetSystemMetrics(SM_CXSMICON),
+        GetSystemMetrics(SM_CYSMICON),
+        LR_DEFAULTCOLOR,
+    )
+    .map(|h| HICON(h.0))
+    .or_else(|_| LoadIconW(None, IDI_APPLICATION))
+    .unwrap_or_default()
+}
+
 unsafe fn tray(hwnd: HWND, action: NOTIFY_ICON_MESSAGE) {
     let mut data = NOTIFYICONDATAW {
         cbSize: size_of::<NOTIFYICONDATAW>() as u32,
@@ -366,7 +387,7 @@ unsafe fn tray(hwnd: HWND, action: NOTIFY_ICON_MESSAGE) {
         uID: 1,
         uFlags: NIF_ICON | NIF_MESSAGE | NIF_TIP,
         uCallbackMessage: WM_TRAY,
-        hIcon: LoadIconW(None, IDI_APPLICATION).unwrap_or_default(),
+        hIcon: app_icon(),
         ..Default::default()
     };
     copy_truncated(

@@ -1,11 +1,12 @@
 [package]
 name = "clipsave"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Save the clipboard image as a PNG file — from a file manager right-click or the command line."
 license = "MIT"
 repository = "https://github.com/narinthon-so/clipsave"
 readme = "README.md"
+build = "build.rs"
 keywords = ["clipboard", "image", "png", "explorer", "cli"]
 categories = ["command-line-utilities"]
 
@@ -43,6 +44,9 @@ windows = { version = "0.62", features = [
     "Win32_UI_Shell_Common",
     "Win32_UI_WindowsAndMessaging",
 ] }
+
+[build-dependencies]
+winresource = "0.1"
 
 [profile.release]
 opt-level = "z"
