@@ -86,7 +86,7 @@ mod imp {
         let _ = Command::new("notify-send")
             .args([
                 "--app-name=clipsave",
-                "--icon=image-x-generic",
+                "--icon=clipsave",
                 "--urgency",
                 urgency,
                 "clipsave",

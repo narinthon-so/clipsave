@@ -64,6 +64,7 @@ for f in "nautilus/scripts/Paste image here" nemo/actions/clipsave.nemo_action \
   [ -x "$share/$f" ] || { echo "FAIL  missing or not executable: $f"; exit 1; }
 done
 [ -x "$HOME/.local/bin/clipsave" ] || { echo "FAIL  binary not installed"; exit 1; }
+[ -s "$share/icons/hicolor/256x256/apps/clipsave.png" ] || { echo "FAIL  icon not installed"; exit 1; }
 pass "install wrote all menu entries"
 
 copy_png
@@ -74,5 +75,6 @@ pass "nautilus script saves into the current folder"
 
 "$bin" uninstall
 [ ! -e "$share/nemo/actions/clipsave.nemo_action" ] && [ ! -e "$HOME/.local/bin/clipsave" ] \
+  && [ ! -e "$share/icons/hicolor/256x256/apps/clipsave.png" ] \
   || { echo "FAIL  uninstall left files"; exit 1; }
 pass "uninstall removed everything"

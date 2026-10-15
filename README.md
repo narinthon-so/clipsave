@@ -1,3 +1,5 @@
+<img src="assets/clipsave.png" width="96" align="right" alt="clipsave icon">
+
 # clipsave
 
 **Save the clipboard image as a PNG file, straight from your file manager's right-click menu.**
