@@ -52,7 +52,7 @@ With the agent running, **Ctrl+V** in an Explorer window or on the desktop saves
 - The clipboard holds an image and **nothing Explorer can paste itself**: no copied files, no Outlook attachments, no items copied from a zip.
 - Only Ctrl is held: Ctrl+Shift+V and the like are left alone.
 
-In every other case the key goes to Explorer untouched. On Windows 11 it uses the tab you're looking at. In folders that aren't on disk (Home, This PC, Gallery) it beeps instead of saving.
+In every other case the key goes to Explorer untouched. On Windows 11 it uses the tab you're looking at. In folders that aren't on disk, like This PC or Gallery, it beeps instead of saving.
 
 **Privacy.** The agent uses a low-level keyboard hook (`WH_KEYBOARD_LL`). It ignores every key except V and never records or sends anything. Read [`src/agent/windows.rs`](src/agent/windows.rs) to check. Antivirus tools sometimes flag unsigned programs that install keyboard hooks. If you'd rather not run it, use `clipsave install --no-agent`, or quit it from its tray icon.
 

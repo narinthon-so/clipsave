@@ -205,7 +205,12 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
             match wparam.0 as u32 {
                 WM_KEYDOWN | WM_SYSKEYDOWN => {
                     if V_TAKEN.load(Ordering::Relaxed) {
-                        return LRESULT(1); // auto-repeat of a press we took over
+                        if GetAsyncKeyState(VK_CONTROL.0 as i32) < 0 {
+                            return LRESULT(1); // auto-repeat of a press we took over
+                        }
+                        // Ctrl is up, so we missed V's key-up (e.g. Win+L
+                        // mid-press): never swallow a plain `v`.
+                        V_TAKEN.store(false, Ordering::Relaxed);
                     }
                     let fg = GetForegroundWindow();
                     if should_take_over(fg) {
