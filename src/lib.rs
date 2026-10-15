@@ -4,16 +4,19 @@
 //! lives in `clip` (reading the clipboard), `notify` (dialogs/toasts) and
 //! `integrate` (file-manager context menus).
 
+mod agent;
 mod cli;
 mod clip;
+#[cfg(windows)]
+mod explorer;
 mod integrate;
 mod notify;
 mod output;
 
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use cli::Command;
+use cli::{AgentAction, Command};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -48,52 +51,67 @@ pub fn run(args: impl IntoIterator<Item = OsString>, windowless: bool) -> i32 {
             EXIT_OK
         }
         Command::Save(opts) => save(opts, windowless),
-        Command::Install => finish(integrate::install(), windowless),
+        Command::Install { agent } => finish(integrate::install(agent), windowless),
         Command::Uninstall => finish(integrate::uninstall(), windowless),
+        Command::Agent(AgentAction::Run) => finish(agent::run(), windowless),
+        Command::Agent(AgentAction::Stop) => {
+            let msg = if agent::stop() {
+                "Stopped the agent."
+            } else {
+                "The agent is not running."
+            };
+            finish(Ok(msg.into()), windowless)
+        }
     }
+}
+
+pub(crate) struct SaveError {
+    pub code: i32,
+    pub message: String,
+}
+
+impl SaveError {
+    fn new(code: i32, message: impl Into<String>) -> Self {
+        SaveError {
+            code,
+            message: message.into(),
+        }
+    }
+}
+
+/// Reads the clipboard image and writes it into `dir` as a new PNG.
+pub(crate) fn save_clipboard(dir: &Path, name: Option<String>) -> Result<PathBuf, SaveError> {
+    let image =
+        match clip::read_image() {
+            Ok(image) => image,
+            Err(clip::ReadError::NoImage) => return Err(SaveError::new(
+                EXIT_NO_IMAGE,
+                "There is no image on the clipboard (or not in a format clipsave can read).\n\n\
+                 Copy an image first (in Figma: Copy as PNG, Ctrl+Shift+C).",
+            )),
+            Err(clip::ReadError::Other(msg)) => {
+                return Err(SaveError::new(
+                    EXIT_ERROR,
+                    format!("Could not read the clipboard: {msg}"),
+                ))
+            }
+        };
+    let png = output::encode_png(&image).map_err(|m| SaveError::new(EXIT_ERROR, m))?;
+    let stem = name.unwrap_or_else(output::default_stem);
+    output::write_new(dir, &stem, &png).map_err(|m| SaveError::new(EXIT_ERROR, m))
 }
 
 fn save(opts: cli::SaveOpts, windowless: bool) -> i32 {
     let gui = opts.gui || windowless;
 
-    let dir = match output::resolve_dir(opts.dir.as_deref()) {
-        Ok(dir) => dir,
-        Err(msg) => {
-            report_error(&msg, gui);
-            return EXIT_ERROR;
-        }
-    };
-
-    let image = match clip::read_image() {
-        Ok(image) => image,
-        Err(clip::ReadError::NoImage) => {
-            report_error(
-                "There is no image on the clipboard (or not in a format clipsave can read).\n\n\
-                 Copy an image first (in Figma: Copy as PNG, Ctrl+Shift+C).",
-                gui,
-            );
-            return EXIT_NO_IMAGE;
-        }
-        Err(clip::ReadError::Other(msg)) => {
-            report_error(&format!("Could not read the clipboard: {msg}"), gui);
-            return EXIT_ERROR;
-        }
-    };
-
-    let png = match output::encode_png(&image) {
-        Ok(png) => png,
-        Err(msg) => {
-            report_error(&msg, gui);
-            return EXIT_ERROR;
-        }
-    };
-
-    let stem = opts.name.unwrap_or_else(output::default_stem);
-    let path: PathBuf = match output::write_new(&dir, &stem, &png) {
+    let result = output::resolve_dir(opts.dir.as_deref())
+        .map_err(|m| SaveError::new(EXIT_ERROR, m))
+        .and_then(|dir| save_clipboard(&dir, opts.name));
+    let path = match result {
         Ok(path) => path,
-        Err(msg) => {
-            report_error(&msg, gui);
-            return EXIT_ERROR;
+        Err(e) => {
+            report_error(&e.message, gui);
+            return e.code;
         }
     };
 
@@ -111,7 +129,9 @@ fn save(opts: cli::SaveOpts, windowless: bool) -> i32 {
 fn finish(result: Result<String, String>, windowless: bool) -> i32 {
     match result {
         Ok(msg) => {
-            say(&msg, windowless);
+            if !msg.is_empty() {
+                say(&msg, windowless);
+            }
             EXIT_OK
         }
         Err(msg) => {

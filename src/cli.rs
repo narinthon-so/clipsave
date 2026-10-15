@@ -5,8 +5,11 @@ clipsave — save the clipboard image as a PNG file
 
 USAGE:
     clipsave [save] [DIR] [OPTIONS]   Save the clipboard image into DIR (default: current folder)
-    clipsave install                  Add \"Paste image here\" to the file manager's right-click menu
-    clipsave uninstall                Remove it again
+    clipsave install [--no-agent]     Add \"Paste image here\" to the file manager's right-click menu;
+                                      on Windows also start the Ctrl+V agent (and at every login)
+    clipsave uninstall                Remove both again
+    clipsave agent [stop]             Run (or stop) the Ctrl+V agent: in Explorer or on the desktop,
+                                      Ctrl+V saves the clipboard image when there is no file to paste
 
 OPTIONS:
     -n, --name <NAME>   File name (\".png\" is added if missing). Default: image-YYYYMMDD-HHMMSS.png
@@ -21,10 +24,17 @@ Prints the saved path on success. Exit code 1 = no (readable) image on the clipb
 #[derive(Debug, PartialEq)]
 pub enum Command {
     Save(SaveOpts),
-    Install,
+    Install { agent: bool },
     Uninstall,
+    Agent(AgentAction),
     Help,
     Version,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum AgentAction {
+    Run,
+    Stop,
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -39,7 +49,20 @@ pub fn parse(args: impl IntoIterator<Item = OsString>) -> Result<Command, String
     let mut args: Vec<OsString> = args.into_iter().collect();
 
     match args.first().and_then(|a| a.to_str()) {
-        Some("install") => return only(args, Command::Install),
+        Some("install") => {
+            return match args.get(1).and_then(|a| a.to_str()) {
+                None => only(args, Command::Install { agent: true }),
+                Some("--no-agent") => only(args[1..].to_vec(), Command::Install { agent: false }),
+                Some(_) => only(args, Command::Install { agent: true }),
+            }
+        }
+        Some("agent") => {
+            return match args.get(1).and_then(|a| a.to_str()) {
+                None => Ok(Command::Agent(AgentAction::Run)),
+                Some("stop") => only(args[1..].to_vec(), Command::Agent(AgentAction::Stop)),
+                Some(_) => only(args, Command::Agent(AgentAction::Run)),
+            }
+        }
         Some("uninstall") => return only(args, Command::Uninstall),
         Some("help") => return Ok(Command::Help),
         Some("save") => {
@@ -146,6 +169,19 @@ mod tests {
         assert!(p(&["a", "b"]).is_err());
         assert!(p(&["--name"]).is_err());
         assert!(p(&["install", "x"]).is_err());
+        assert!(p(&["install", "--no-agent", "x"]).is_err());
+        assert!(p(&["agent", "go"]).is_err());
+    }
+
+    #[test]
+    fn install_and_agent() {
+        assert_eq!(p(&["install"]), Ok(Command::Install { agent: true }));
+        assert_eq!(
+            p(&["install", "--no-agent"]),
+            Ok(Command::Install { agent: false })
+        );
+        assert_eq!(p(&["agent"]), Ok(Command::Agent(AgentAction::Run)));
+        assert_eq!(p(&["agent", "stop"]), Ok(Command::Agent(AgentAction::Stop)));
     }
 
     #[test]

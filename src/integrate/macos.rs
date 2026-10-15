@@ -12,7 +12,8 @@ fn bin_path() -> Result<PathBuf, String> {
     Ok(PathBuf::from(home).join(".local/bin/clipsave"))
 }
 
-pub fn install() -> Result<String, String> {
+/// `_agent`: the Ctrl+V agent is Windows-only.
+pub fn install(_agent: bool) -> Result<String, String> {
     let src = std::env::current_exe().map_err(|e| format!("Cannot locate clipsave: {e}"))?;
     let bin = bin_path()?;
     if fs::canonicalize(&src).ok() != fs::canonicalize(&bin).ok() {

@@ -2,7 +2,8 @@
 //!
 //! On Windows 11 classic verbs live under "Show more options" (or Shift+F10 /
 //! Shift+right-click). A top-level Windows 11 entry needs an IExplorerCommand
-//! COM handler in a signed package, which is out of scope here.
+//! COM handler in a signed package, which is out of scope here; the Ctrl+V
+//! agent (started at login from the Run key) is the one-step alternative.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,6 +14,9 @@ use winreg::RegKey;
 use super::LABEL;
 
 const BINARIES: [&str; 2] = ["clipsave.exe", "clipsavew.exe"];
+
+const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+const RUN_VALUE: &str = "clipsave";
 
 /// (registry key under HKCU\Software\Classes, menu label, Explorer placeholder, extra flags)
 const VERBS: [(&str, &str, &str, &str); 2] = [
@@ -43,13 +47,16 @@ pub(crate) fn command_line(exe: &Path, placeholder: &str, flags: &str) -> String
     format!("\"{}\" save --gui{flags} \"{placeholder}\"", exe.display())
 }
 
-pub fn install() -> Result<String, String> {
+pub fn install(agent: bool) -> Result<String, String> {
     let src_dir = std::env::current_exe()
         .map_err(|e| format!("Cannot locate clipsave.exe: {e}"))?
         .parent()
         .map(Path::to_path_buf)
         .ok_or("Cannot locate the clipsave folder")?;
     let dest = install_dir()?;
+
+    // A running agent locks clipsavew.exe: stop it before copying over it.
+    crate::agent::stop();
 
     // Copy both binaries so the menu keeps working after the download is deleted.
     if !same_dir(&src_dir, &dest) {
@@ -80,16 +87,34 @@ pub fn install() -> Result<String, String> {
             .map_err(reg_err)?;
     }
 
+    let (run, _) = hkcu
+        .create_subkey(RUN_KEY)
+        .map_err(|e| format!("Cannot open HKCU\\{RUN_KEY}: {e}"))?;
+    let agent_note = if agent {
+        run.set_value(RUN_VALUE, &format!("\"{}\" agent", exe.display()))
+            .map_err(|e| format!("Cannot write HKCU\\{RUN_KEY}: {e}"))?;
+        crate::agent::start(&exe)?;
+        "\n\nCtrl+V in Explorer or on the desktop now saves a clipboard image\n\
+         (when there is no file to paste). Runs at login; quit from the tray icon."
+    } else {
+        let _ = run.delete_value(RUN_VALUE);
+        ""
+    };
+
     Ok(format!(
         "Installed to {}\n\n\
          Right-click empty space in a folder → Show more options → \"{LABEL}\".\n\
-         Tip: Shift+right-click opens the full menu directly.",
+         Tip: Shift+right-click opens the full menu directly.{agent_note}",
         dest.display()
     ))
 }
 
 pub fn uninstall() -> Result<String, String> {
+    crate::agent::stop();
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    if let Ok(run) = hkcu.open_subkey_with_flags(RUN_KEY, winreg::enums::KEY_SET_VALUE) {
+        let _ = run.delete_value(RUN_VALUE);
+    }
     for (key, ..) in VERBS {
         match hkcu.delete_subkey_all(key) {
             Ok(()) => {}
@@ -108,7 +133,7 @@ pub fn uninstall() -> Result<String, String> {
     }
     let _ = fs::remove_dir(&dest);
 
-    let mut msg = String::from("Removed the right-click menu entries.");
+    let mut msg = String::from("Removed the right-click menu entries and the Ctrl+V agent.");
     if !left.is_empty() {
         msg.push_str(&format!(
             "\nDelete {} by hand to finish (it is in use).",
